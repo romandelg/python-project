@@ -92,16 +92,27 @@ class Synthesizer:
         self.voice_lock = threading.Lock()
         
         self.stream.start()
-        self.voice_gain = 0.5  # Add gain control
+        self.voice_gain = 0.25  # Reduced default gain
+        self.max_voices = 16    # Limit maximum concurrent voices
+        self.dc_block = DCBlocker()  # Add DC blocking
+        self.safety_limiter = SafetyLimiter()  # Add safety limiter
 
     def note_on(self, note):
-        freq = 440.0 * (2.0 ** ((note - 69) / 12.0))
-        # Create voice with template chain
-        voice = Voice(freq, self.voice_chain_template)
-        voice.adsr.note_on()  # Initialize ADSR state
         with self.voice_lock:
-            self.active_voices[note] = voice
-        self.event_queue.put(('note_on', note, freq))
+            # Limit maximum voices
+            if len(self.active_voices) >= self.max_voices:
+                oldest_note = min(self.active_voices.keys(), 
+                                key=lambda k: self.active_voices[k].note_on_time)
+                self.note_off(oldest_note)
+            
+            try:
+                freq = 440.0 * (2.0 ** ((note - 69) / 12.0))
+                voice = Voice(freq, self.voice_chain_template)
+                voice.adsr.note_on()
+                self.active_voices[note] = voice
+                self.event_queue.put(('note_on', note, freq))
+            except Exception as e:
+                print(f"Note on error: {e}")
 
     def note_off(self, note):
         if note in self.active_voices:
@@ -202,55 +213,59 @@ class Synthesizer:
             # Process voices with lock
             with self.voice_lock:
                 if self.active_voices or self.released_voices:
-                    duration = frames / self.sample_rate
-                    active_voice_count = len(self.active_voices) + len(self.released_voices)
-                    voice_gain = self.voice_gain / max(1, np.sqrt(active_voice_count))
-                    
-                    # Process active voices
-                    for voice in list(self.active_voices.values()):
-                        try:
-                            waveform = self.oscillator.generate(voice.freq, self.sample_rate, duration)
-                            processed = voice.audio_chain.process_voice(voice, waveform)
-                            processed = voice.adsr.apply_envelope(processed)
-                            # Apply gain and clip
-                            processed = np.clip(processed * voice_gain, -1.0, 1.0)
-                            temp_buffer += processed
-                        except Exception as e:
-                            print(f"Voice processing error: {e}")
-                    
-                    # Process released voices with same gain handling
-                    released_done = []
-                    for note, voice in self.released_voices.items():
-                        try:
-                            if voice.is_finished():
-                                released_done.append(note)
-                                continue
-                            
-                            waveform = self.oscillator.generate(voice.freq, self.sample_rate, duration)
-                            processed = voice.audio_chain.process_voice(voice, waveform)
-                            processed = voice.adsr.apply_envelope(processed)
-                            processed = np.clip(processed * voice_gain, -1.0, 1.0)
-                            temp_buffer += processed
-                        except Exception as e:
-                            print(f"Released voice processing error: {e}")
-                            released_done.append(note)
+                    try:
+                        duration = frames / self.sample_rate
+                        active_voice_count = len(self.active_voices) + len(self.released_voices)
+                        voice_gain = self.voice_gain / max(1, np.sqrt(active_voice_count))
 
-                    # Normalize summed output
-                    temp_buffer = np.clip(temp_buffer, -1.0, 1.0)
+                        self._process_active_voices(temp_buffer, duration, voice_gain)
+                        self._process_released_voices(temp_buffer, duration, voice_gain)
+                        
+                        # Apply DC blocking and limiting
+                        temp_buffer = self.dc_block.process(temp_buffer)
+                        temp_buffer = self.safety_limiter.process(temp_buffer)
+                    except Exception as e:
+                        print(f"Voice processing error: {e}")
+                        temp_buffer.fill(0)
 
-            # Process through effects chain with parameter lock
-            with self.param_lock:
-                try:
-                    temp_buffer = self.effects_chain.process_audio(temp_buffer)
-                except Exception as e:
-                    print(f"Effects processing error: {e}")
-
-            # Final output processing
+            # Final safety check
+            if np.any(np.isnan(temp_buffer)) or np.any(np.isinf(temp_buffer)):
+                temp_buffer.fill(0)
+            
             np.clip(temp_buffer, -1.0, 1.0, out=outdata[:, 0])
 
         except Exception as e:
             print(f"Audio callback error: {e}")
             outdata.fill(0)
+
+    def _process_active_voices(self, buffer, duration, gain):
+        for voice in list(self.active_voices.values()):
+            try:
+                waveform = self.oscillator.generate(voice.freq, self.sample_rate, duration)
+                processed = voice.audio_chain.process_voice(voice, waveform)
+                processed = voice.adsr.apply_envelope(processed)
+                np.add(buffer, np.clip(processed * gain, -1.0, 1.0), out=buffer)
+            except Exception as e:
+                print(f"Active voice processing error: {e}")
+
+    def _process_released_voices(self, buffer, duration, gain):
+        released_done = []
+        for note, voice in self.released_voices.items():
+            try:
+                if voice.is_finished():
+                    released_done.append(note)
+                    continue
+                
+                waveform = self.oscillator.generate(voice.freq, self.sample_rate, duration)
+                processed = voice.audio_chain.process_voice(voice, waveform)
+                processed = voice.adsr.apply_envelope(processed)
+                np.add(buffer, np.clip(processed * gain, -1.0, 1.0), out=buffer)
+            except Exception as e:
+                print(f"Released voice processing error: {e}")
+                released_done.append(note)
+        
+        for note in released_done:
+            self.released_voices.pop(note, None)
 
     def toggle_effect(self, effect_name, enabled):
         if effect_name in self.effects:
@@ -286,3 +301,38 @@ class Voice:
 
     def is_finished(self):
         return self.release_triggered and self.adsr.current_state == 'off'
+
+class DCBlocker:
+    def __init__(self):
+        self.x1 = 0.0
+        self.y1 = 0.0
+        self.R = 0.995
+
+    def process(self, signal):
+        output = np.zeros_like(signal)
+        for i in range(len(signal)):
+            output[i] = signal[i] - self.x1 + self.R * self.y1
+            self.x1 = signal[i]
+            self.y1 = output[i]
+        return output
+
+class SafetyLimiter:
+    def __init__(self, threshold=0.95, release_time=0.1):
+        self.threshold = threshold
+        self.release_coeff = np.exp(-1.0 / (44100 * release_time))
+        self.envelope = 0.0
+
+    def process(self, signal):
+        output = signal.copy()
+        for i in range(len(signal)):
+            abs_sample = abs(signal[i])
+            if abs_sample > self.envelope:
+                self.envelope = abs_sample
+            else:
+                self.envelope *= self.release_coeff
+
+            if self.envelope > self.threshold:
+                gain_reduction = self.threshold / self.envelope
+                output[i] *= gain_reduction
+
+        return output
