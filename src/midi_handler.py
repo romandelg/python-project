@@ -3,11 +3,13 @@ import time
 import signal
 import sys
 from event_handler import EventHandler
+from adsr import ADSR
 
 class MIDIHandler:    
     def __init__(self, event_handler):
         self.event_handler = event_handler
         self.running = True
+        self.adsr = ADSR()
         signal.signal(signal.SIGINT, self._signal_handler)
     
     def _signal_handler(self, signum, frame):
@@ -36,6 +38,18 @@ class MIDIHandler:
                     for message in midi_port.iter_pending():
                         if message.type in ['note_on', 'note_off', 'control_change']:
                             self.event_handler.handle_event(message)
+                        if message.type == 'control_change':
+                            self.handle_control_change(message)
                     time.sleep(0.001)
         except KeyboardInterrupt:
             print("\nStopping...")
+
+    def handle_control_change(self, message):
+        if message.control == 18:
+            self.adsr.set_attack(message.value / 127.0)
+        elif message.control == 19:
+            self.adsr.set_sustain(message.value / 127.0)
+        elif message.control == 20:
+            self.adsr.set_decay(message.value / 127.0)
+        elif message.control == 21:
+            self.adsr.set_release(message.value / 127.0)

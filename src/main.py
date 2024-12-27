@@ -9,10 +9,12 @@ import sys  # Library for system-specific parameters and functions
 from midi_handler import MIDIHandler  # Import MIDIHandler class
 from synthesizer import Synthesizer  # Import Synthesizer class
 from event_handler import EventHandler  # Import EventHandler class
+from adsr import ADSR  # Import ADSR class
 
 def main():
     synthesizer = Synthesizer()
-    event_handler = EventHandler(synthesizer)
+    adsr = ADSR()
+    event_handler = EventHandler(synthesizer, adsr)
     midi = MIDIHandler(event_handler)
     midi.scan_devices()
     

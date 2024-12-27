@@ -1,6 +1,7 @@
 class EventHandler:
-    def __init__(self, synthesizer):
+    def __init__(self, synthesizer, adsr):
         self.synthesizer = synthesizer
+        self.adsr = adsr
 
     def handle_event(self, event):
         if event.type == 'note_on':

@@ -17,8 +17,7 @@ def generate_pulse(frequency, sample_rate, duration, duty_cycle=0.5):
     return np.where((t * frequency) % 1 < duty_cycle, 1.0, -1.0)
 
 def morph_waveforms(waveforms, weights):
-    normalized_weights = np.array(weights) / sum(weights)
-    combined_wave = sum(w * waveform for w, waveform in zip(normalized_weights, waveforms))
+    combined_wave = sum(w * waveform for w, waveform in zip(weights, waveforms))
     return combined_wave
 
 class Oscillator:
