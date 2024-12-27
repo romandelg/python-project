@@ -8,12 +8,10 @@ class SynthesizerGUI:
         self.root.geometry("600x800")
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
         
-        # Create frames for each section
         self.osc_frame = self._create_section_frame("Oscillator Mix Levels")
         self.filter_frame = self._create_section_frame("Filter Parameters")
         self.adsr_frame = self._create_section_frame("ADSR Envelope")
         
-        # Initialize progress bars
         self.osc_bars = self._create_osc_section()
         self.filter_bars = self._create_filter_section()
         self.adsr_bars = self._create_adsr_section()
@@ -92,8 +90,7 @@ class SynthesizerGUI:
         self.root.after(0, self._update_adsr, attack, decay, sustain, release)
         
     def _update_adsr(self, attack, decay, sustain, release):
-        values = {'attack': attack, 'decay': decay, 
-                 'sustain': sustain, 'release': release}
+        values = {'attack': attack, 'decay': decay, 'sustain': sustain, 'release': release}
         for param, value in values.items():
             bar, label = self.adsr_bars[param]
             bar['value'] = value * 100
