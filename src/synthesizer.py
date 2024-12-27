@@ -74,19 +74,19 @@ class Synthesizer:
         while not self.event_queue.empty():
             event = self.event_queue.get()
             if event[0] == 'note_on':
-                _, note, velocity, freq = event
+                _, note, _, freq = event  # Ignore velocity
                 if note not in self.active_voices:
-                    self.active_voices[note] = Voice(freq, velocity)
+                    self.active_voices[note] = Voice(freq)
                     self.active_voices[note].playing = True
             elif event[0] == 'note_off' and event[1] in self.active_voices:
                 del self.active_voices[event[1]]
 
-        # Generate audio with proper scaling
+        # Generate audio with fixed amplitude
         if self.active_voices:
             for voice in list(self.active_voices.values()):
                 duration = frames / self.sample_rate
                 waveform = self.oscillator.generate(voice.freq, self.sample_rate, duration)
-                outdata[:, 0] += 0.5 * (voice.velocity / 127.0) * waveform
+                outdata[:, 0] += 0.5 * waveform  # Fixed amplitude of 0.5
                 voice.phase = (voice.phase + frames) % self.sample_rate
             
             # Apply low pass filter
@@ -96,8 +96,7 @@ class Synthesizer:
             outdata[:, 0] = np.tanh(outdata[:, 0])
 
 class Voice:
-    def __init__(self, freq, velocity):
+    def __init__(self, freq):  # Remove velocity parameter
         self.freq = freq
-        self.velocity = velocity
         self.playing = False
         self.phase = 0.0

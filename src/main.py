@@ -11,6 +11,10 @@ from synthesizer import Synthesizer  # Import Synthesizer class
 from event_handler import EventHandler  # Import EventHandler class
 from adsr import ADSR  # Import ADSR class
 from oscillator import Oscillator  # Import Oscillator class
+from terminal_display import start_gui  # Import start_gui function
+
+def midi_handler_thread(midi_handler, port_name):
+    midi_handler.start(port_name if port_name else None)
 
 def main():
     synthesizer = Synthesizer()
@@ -20,10 +24,13 @@ def main():
     midi.scan_devices()
     
     port_name = input("Enter MIDI device name (or press Enter for first available): ").strip()
-    midi.start(port_name if port_name else None)
     
-    oscillator = Oscillator()
-    oscillator.print_oscillator_bars()  # Print oscillator values on bars
+    # Start MIDI handling in a separate thread
+    midi_thread = threading.Thread(target=midi_handler_thread, args=(midi, port_name), daemon=True)
+    midi_thread.start()
+    
+    # Start GUI in the main thread
+    start_gui()
 
 if __name__ == "__main__":
     main()
