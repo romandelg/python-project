@@ -6,6 +6,24 @@ from event_handler import EventHandler
 from adsr import ADSR
 from filter import LowPassFilter
 
+"""
+MIDI Input Processing:
+1. Scans and connects to MIDI devices
+2. Receives MIDI messages in real-time
+3. Converts MIDI messages to synth events
+4. Routes control changes to appropriate parameters
+
+Message Types Handled:
+- Note On (key press)
+- Note Off (key release)
+- Control Change (knob/slider movements)
+  * CC 14-17: Oscillator mix levels
+  * CC 26-29: Oscillator detune
+  * CC 18-21: ADSR parameters
+  * CC 22-23: Filter parameters
+  * CC 102-106: Effect controls
+"""
+
 class MIDIHandler:    
     def __init__(self, event_handler):
         self.event_handler = event_handler

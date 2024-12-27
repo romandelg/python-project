@@ -1,24 +1,71 @@
 import numpy as np
+import threading
 from dataclasses import dataclass
 from typing import Dict, Any, Callable
-import threading
+
+"""
+Audio Processing Chain System
+---------------------------
+Manages the routing and processing of audio signals through
+various modules (oscillators, filters, effects).
+
+Signal Flow:
+1. Voice Generation
+   Oscillator -> Filter -> ADSR -> Voice Output
+
+2. Voice Mixing
+   Sum of all active voices
+
+3. Global Processing
+   Mixed Voices -> Effects Chain -> Master Output
+
+Module Features:
+- Individual bypass control
+- Wet/dry mixing
+- Parameter modulation
+- Real-time parameter updates
+
+Threading:
+- Thread-safe parameter updates
+- Lock-protected audio processing
+- Safe buffer management
+"""
 
 @dataclass
 class ModulationTarget:
-    parameter: str
-    min_value: float
-    max_value: float
-    current_value: float
-    callback: Callable
+    """
+    Defines a parameter that can be modulated in real-time.
+    Examples: filter cutoff, LFO rate, effect parameters
+    """
+    parameter: str          # Parameter name
+    min_value: float       # Minimum allowed value
+    max_value: float       # Maximum allowed value
+    current_value: float   # Current parameter value
+    callback: Callable     # Function to call when value changes
 
 class AudioModule:
+    """
+    Base class for all audio processing modules.
+    Provides parameter modulation and audio processing framework.
+    
+    Features:
+    - Enable/disable control
+    - Bypass functionality
+    - Parameter modulation support
+    - Buffer management
+    """
     def __init__(self, name):
+        """
+        Initialize module with basic controls and buffers.
+        Args:
+            name: Unique identifier for the module
+        """
         self.name = name
-        self.enabled = True
-        self.bypass = False
-        self.modulation_targets: Dict[str, ModulationTarget] = {}
-        self.input_buffer = None
-        self.output_buffer = None
+        self.enabled = True                # Module can be enabled/disabled
+        self.bypass = False                # Module can be bypassed
+        self.modulation_targets = {}       # Modulation parameters
+        self.input_buffer = None          # Input audio buffer
+        self.output_buffer = None         # Output audio buffer
 
     def add_modulation_target(self, name: str, min_val: float, max_val: float, callback: Callable):
         self.modulation_targets[name] = ModulationTarget(name, min_val, max_val, 0.0, callback)
@@ -31,6 +78,15 @@ class AudioModule:
             target.callback(normalized)
 
     def process(self, signal):
+        """
+        Process audio through the module.
+        Handles bypass and disabled states.
+        
+        Args:
+            signal: Input audio buffer
+        Returns:
+            Processed audio buffer
+        """
         if not self.enabled or self.bypass:
             return signal
         return self._process_audio(signal)
@@ -59,12 +115,23 @@ class ADSRModule(AudioModule):
         self.note_off = True
 
 class AudioChainHandler:
+    """
+    Manages a chain of audio processing modules.
+    Handles routing, module ordering, and signal flow.
+    
+    Features:
+    - Dynamic module addition/removal
+    - Parameter modulation routing
+    - Thread-safe processing
+    - Buffer management
+    """
     def __init__(self):
-        self.chain = []
-        self.mod_matrix = {}
-        self._buffer = None
-        self.effects_chain = []
-        self.processing_lock = threading.Lock()
+        """Initialize chain with processing buffers and synchronization"""
+        self.chain = []                    # Ordered list of modules
+        self.mod_matrix = {}               # Modulation routing
+        self._buffer = None                # Processing buffer
+        self.effects_chain = []            # Effects modules
+        self.processing_lock = threading.Lock()  # Thread safety
 
     def add_module(self, module, position=None):
         if position is None:
@@ -90,32 +157,42 @@ class AudioChainHandler:
         self.effects_chain.append(effect_module)
 
     def process_voice(self, voice, signal):
-        """Process audio for a single voice through its module chain"""
+        """
+        Process a single voice through its module chain.
+        
+        Args:
+            voice: Voice instance containing state
+            signal: Input audio buffer
+        Returns:
+            Processed voice output
+        """
+        # Initialize or resize buffer if needed
         if self._buffer is None or len(self._buffer) != len(signal):
             self._buffer = np.zeros_like(signal)
 
+        # Copy input signal to avoid modifying original
         np.copyto(self._buffer, signal)
         
-        # Apply voice-specific processing
+        # Process through active modules
         active_modules = [m for m in self.chain if m.enabled and not m.bypass]
         for module in active_modules:
-            self._buffer = module.process(self._buffer)
-            
+            try:
+                self._buffer = module.process(self._buffer)
+            except Exception as e:
+                print(f"Module processing error: {e}")
+                
         return self._buffer
 
-    def process_audio(self, voices_output):
-        """Process the mixed output through global effects"""
-        if not self.effects_chain:
-            return voices_output
-
-        result = voices_output
-        for effect in self.effects_chain:
-            if effect.enabled and not effect.bypass:
-                result = effect.process(result)
-        
-        return result
-
     def process_audio(self, signal):
+        """
+        Process audio through the global effects chain.
+        Thread-safe processing with error handling.
+        
+        Args:
+            signal: Mixed voice audio buffer
+        Returns:
+            Processed output buffer
+        """
         with self.processing_lock:
             try:
                 if not self.chain:

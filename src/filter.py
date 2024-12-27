@@ -2,25 +2,41 @@ import numpy as np
 from terminal_display import print_filter_values
 
 class LowPassFilter:
+    """
+    Real-time low-pass filter with resonance control.
+    Implements a 2-pole (12dB/octave) resonant filter.
+    """
     def __init__(self):
-        self.cutoff_freq = 1000.0
-        self.resonance = 0.5
-        self.sample_rate = 44100
-        # Filter coefficients
-        self.a1 = 0.0
-        self.b0 = 0.0
-        self.b1 = 0.0
-        self._prev_x = 0.0
-        self._prev_y = 0.0
-        self._dc_block = 0.0
-        self._dc_block_factor = 0.995
-        self._prev_cutoff = None
-        self._prev_resonance = None
-        self._coefficient_smooth = 0.99
-        self._max_coefficient_change = 0.1
+        # Filter parameters
+        self.cutoff_freq = 1000.0         # Cutoff frequency in Hz
+        self.resonance = 0.5              # Resonance (Q) factor
+        self.sample_rate = 44100          # Sample rate in Hz
+
+        # Filter state
+        self.a1 = 0.0                     # Feedback coefficient
+        self.b0 = 0.0                     # Input gain
+        self.b1 = 0.0                     # Feed-forward coefficient
+        self._prev_x = 0.0                # Previous input sample
+        self._prev_y = 0.0                # Previous output sample
+
+        # DC blocking
+        self._dc_block = 0.0              # DC offset removal
+        self._dc_block_factor = 0.995     # DC blocking strength
+
+        # Coefficient smoothing
+        self._prev_cutoff = None          # Previous cutoff frequency
+        self._prev_resonance = None       # Previous resonance value
+        self._coefficient_smooth = 0.99    # Smoothing factor
+        self._max_coefficient_change = 0.1 # Maximum parameter change per sample
+
+        # Initialize filter
         self._update_coefficients()
 
     def _update_coefficients(self):
+        """
+        Calculate filter coefficients based on current parameters.
+        Uses frequency warping and coefficient smoothing for stability.
+        """
         try:
             # Normalize and bound frequencies
             w0 = 2.0 * np.pi * np.clip(self.cutoff_freq, 20.0, self.sample_rate/2.1) / self.sample_rate
@@ -69,6 +85,10 @@ class LowPassFilter:
         print_filter_values(self.cutoff_freq, self.resonance)
 
     def apply_filter(self, signal):
+        """
+        Process audio signal through the filter.
+        Includes DC blocking and coefficient interpolation.
+        """
         output = np.zeros_like(signal, dtype=np.float64)
         
         for i in range(len(signal)):
@@ -100,3 +120,21 @@ class LowPassFilter:
         self.b1 = 0.5
         self._prev_cutoff = None
         self._prev_resonance = None
+
+"""
+Real-time Filter Processing:
+1. Low-Pass Filter:
+   - 12dB/octave slope (we could make it steeper or less so)
+   - Variable cutoff (20Hz - Nyquist)
+   - Resonance control
+   
+2. Stability Features:
+   - Coefficient smoothing
+   - Parameter bounds checking
+   - DC offset removal
+   
+3. Performance:
+   - Efficient difference equation
+   - Minimal memory usage
+   - Buffer reuse
+"""

@@ -3,6 +3,36 @@ from tkinter import ttk
 import queue
 import time
 
+"""
+GUI System Architecture:
+1. Display Sections:
+   - Oscillator controls and visualization
+   - Filter parameters
+   - ADSR envelope
+   - Effects controls
+
+2. Update System:
+   - Thread-safe queue
+   - Rate-limited updates (30 FPS)
+   - Event-driven parameter display
+
+3. User Interface:
+   - Real-time parameter visualization
+   - Effect enable/disable toggles
+   - Parameter value displays
+"""
+
+"""
+Real-time Parameter Display System
+--------------------------------
+Provides visual feedback of synthesizer parameters.
+
+Update System:
+1. Parameters → Update Queue → GUI Thread → Visual Display
+2. Rate-limited to 30 FPS for efficiency
+3. Thread-safe operation
+"""
+
 class SynthesizerGUI:
     def __init__(self):
         self.root = tk.Tk()
@@ -106,29 +136,42 @@ class SynthesizerGUI:
         return controls
 
     def process_updates(self):
+        """
+        Process queued parameter updates at fixed rate.
+        Prevents GUI overload from rapid parameter changes.
+        """
         current_time = time.time()
         if current_time - self.last_update >= self.update_interval:
-            updates = {}
-            try:
-                while True:
-                    update_type, args = self.update_queue.get_nowait()
-                    updates[update_type] = args
-            except queue.Empty:
-                pass
-
-            if 'oscillator' in updates:
-                self._update_oscillator(*updates['oscillator'])
-            if 'filter' in updates:
-                self._update_filter(*updates['filter'])
-            if 'adsr' in updates:
-                self._update_adsr(*updates['adsr'])
-            if 'effect' in updates:
-                self._update_effect(*updates['effect'])
-
+            # Process all pending updates in queue
+            updates = self._collect_updates()
+            self._apply_updates(updates)
             self.last_update = current_time
 
+        # Schedule next update
         if self.running:
             self.root.after(10, self.process_updates)
+
+    def _collect_updates(self):
+        """Gather all pending updates from queue"""
+        updates = {}
+        try:
+            while True:
+                update_type, args = self.update_queue.get_nowait()
+                updates[update_type] = args
+        except queue.Empty:
+            pass
+        return updates
+
+    def _apply_updates(self, updates):
+        """Apply collected updates to GUI elements"""
+        if 'oscillator' in updates:
+            self._update_oscillator(*updates['oscillator'])
+        if 'filter' in updates:
+            self._update_filter(*updates['filter'])
+        if 'adsr' in updates:
+            self._update_adsr(*updates['adsr'])
+        if 'effect' in updates:
+            self._update_effect(*updates['effect'])
 
     def update_oscillator(self, mix_levels, detune_values):
         self.update_queue.put(('oscillator', (mix_levels, detune_values)))

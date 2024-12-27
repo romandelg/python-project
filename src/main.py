@@ -1,3 +1,15 @@
+"""
+Main Entry Point and Program Flow:
+1. Initialize core components (Synthesizer, MIDI handler, GUI)
+2. Start MIDI listening thread (non-blocking)
+3. Start GUI in main thread
+4. Handle program shutdown
+
+Threading Architecture:
+- Main Thread: GUI and user interface
+- MIDI Thread: MIDI input processing
+- Audio Thread: Sound generation (managed by sounddevice)
+"""
 # Import necessary libraries
 import mido  # Library for working with MIDI messages
 import numpy as np  # Library for numerical operations

@@ -2,3 +2,4 @@ mido>=1.2.10
 numpy>=1.21.0
 sounddevice>=0.4.5
 python-rtmidi>=1.4.9  # mido still needs this as backend, but installation is optional
+numpy

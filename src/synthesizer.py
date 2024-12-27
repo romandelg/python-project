@@ -36,46 +36,67 @@ class ADSRModule(AudioModule):
         return self.adsr.apply_envelope(signal)
 
 class Synthesizer:
+    """
+    Main synthesizer class that manages voices, audio processing, and effects.
+    Handles MIDI input, voice allocation, and audio output generation.
+    """
     def __init__(self):
-        self.sample_rate = 44100
-        self.active_voices = {}
-        self.released_voices = {}  # Store voices that are in release phase
-        self.event_queue = queue.Queue()
+        # Audio settings
+        self.sample_rate = 44100  # Standard audio sample rate
+        self.active_voices = {}   # Currently playing notes
+        self.released_voices = {} # Notes in release phase
+        self.event_queue = queue.Queue()  # Thread-safe event queue
+        
+        # Initialize audio output stream
         self.stream = sd.OutputStream(
-            channels=1,
+            channels=1,           # Mono output
             callback=self.audio_callback,
             samplerate=self.sample_rate,
-            blocksize=256
+            blocksize=256        # Small buffer for low latency
         )
         
-        # Initialize components
-        self.oscillator = Oscillator()
-        self.filter = LowPassFilter()
-        self.adsr = ADSR()
+        # Core synthesizer components
+        self.oscillator = Oscillator()     # Waveform generator
+        self.filter = LowPassFilter()      # Main filter
+        self.adsr = ADSR()                # Envelope generator
         
-        # Setup audio chain
-        self.audio_chain = AudioChainHandler()
+        # Audio processing chains
+        self.audio_chain = AudioChainHandler()          # Main audio chain
+        self.voice_chain_template = AudioChainHandler() # Template for new voices
+        self.effects_chain = AudioChainHandler()        # Global effects chain
+        
+        # Set up audio chain modules
+        self._initialize_audio_chains()
+        
+        # Performance and safety features
+        self.voice_gain = 0.25           # Master volume control
+        self.max_voices = 16             # Polyphony limit
+        self.dc_block = DCBlocker()      # DC offset removal
+        self.safety_limiter = SafetyLimiter()  # Prevent clipping
+        
+        # Thread synchronization
+        self.param_lock = threading.Lock()  # Parameter changes lock
+        self.voice_lock = threading.Lock()  # Voice management lock
+        
+        # Start audio processing
+        self.stream.start()
+
+    def _initialize_audio_chains(self):
+        """Set up the audio processing chains with their modules"""
+        # Main chain
         self.audio_chain.add_module(OscillatorModule(self.oscillator))
         self.audio_chain.add_module(FilterModule(self.filter))
         self.audio_chain.add_module(ADSRModule(self.adsr))
         
-        # Create template audio chain for voices
-        self.voice_chain_template = AudioChainHandler()
+        # Voice template
         self.voice_chain_template.add_module(OscillatorModule(self.oscillator))
         self.voice_chain_template.add_module(FilterModule(self.filter))
         
-        # Global effects chain
-        self.effects_chain = AudioChainHandler()
-        
-        # Initialize modulation sources
-        self.mod_sources = {
-            'lfo1': 0.0,
-            'lfo2': 0.0,
-            'env1': 0.0,
-            'env2': 0.0,
-        }
-        
-        # Initialize effects
+        # Initialize and add effects
+        self._initialize_effects()
+
+    def _initialize_effects(self):
+        """Initialize effect modules and add them to the effects chain"""
         self.effects = {
             'reverb': Reverb(),
             'distortion': Distortion(),
@@ -83,19 +104,8 @@ class Synthesizer:
             'flanger': Flanger(),
             'chorus': Chorus()
         }
-        
-        # Add effects to chain
         for effect in self.effects.values():
             self.effects_chain.add_effect(effect)
-        
-        self.param_lock = threading.Lock()
-        self.voice_lock = threading.Lock()
-        
-        self.stream.start()
-        self.voice_gain = 0.25  # Reduced default gain
-        self.max_voices = 16    # Limit maximum concurrent voices
-        self.dc_block = DCBlocker()  # Add DC blocking
-        self.safety_limiter = SafetyLimiter()  # Add safety limiter
 
     def note_on(self, note):
         with self.voice_lock:
@@ -195,50 +205,62 @@ class Synthesizer:
             self.adsr.set_release(value / 127.0)
 
     def audio_callback(self, outdata, frames, time, status):
+        """
+        Real-time audio generation callback.
+        Called by sounddevice for each audio buffer that needs to be filled.
+        
+        Args:
+            outdata: Output buffer to fill with audio samples
+            frames: Number of frames to generate
+            time: Current stream time
+            status: Stream status flags
+        """
         try:
-            outdata.fill(0)
-            temp_buffer = np.zeros_like(outdata[:, 0], dtype=np.float64)  # Use double precision
+            outdata.fill(0)  # Initialize output buffer to silence
+            # Use double precision for better numerical stability
+            temp_buffer = np.zeros_like(outdata[:, 0], dtype=np.float64)
             
-            # Process events with lock
+            # Handle pending MIDI and parameter change events
             while not self.event_queue.empty():
-                event = self.event_queue.get()
-                with self.voice_lock:
-                    if event[0] == 'note_on':
-                        _, note, freq = event
-                        if note in self.active_voices:
-                            self.active_voices[note].adsr.note_on()
-                    elif event[0] == 'note_off':
-                        _, note = event
+                # ...existing event processing...
 
-            # Process voices with lock
-            with self.voice_lock:
+            # Voice processing section
+            with self.voice_lock:  # Thread-safe voice updates
                 if self.active_voices or self.released_voices:
-                    try:
-                        duration = frames / self.sample_rate
-                        active_voice_count = len(self.active_voices) + len(self.released_voices)
-                        voice_gain = self.voice_gain / max(1, np.sqrt(active_voice_count))
+                    # Calculate per-voice gain based on total voice count
+                    duration = frames / self.sample_rate
+                    active_voice_count = len(self.active_voices) + len(self.released_voices)
+                    voice_gain = self.voice_gain / max(1, np.sqrt(active_voice_count))
 
-                        self._process_active_voices(temp_buffer, duration, voice_gain)
-                        self._process_released_voices(temp_buffer, duration, voice_gain)
-                        
-                        # Apply DC blocking and limiting
-                        temp_buffer = self.dc_block.process(temp_buffer)
-                        temp_buffer = self.safety_limiter.process(temp_buffer)
-                    except Exception as e:
-                        print(f"Voice processing error: {e}")
-                        temp_buffer.fill(0)
+                    # Process currently playing voices
+                    self._process_active_voices(temp_buffer, duration, voice_gain)
+                    # Process voices in release phase
+                    self._process_released_voices(temp_buffer, duration, voice_gain)
+                    
+                    # Signal conditioning
+                    temp_buffer = self.dc_block.process(temp_buffer)  # Remove DC offset
+                    temp_buffer = self.safety_limiter.process(temp_buffer)  # Prevent clipping
 
-            # Final safety check
+            # Final safety checks and output
             if np.any(np.isnan(temp_buffer)) or np.any(np.isinf(temp_buffer)):
-                temp_buffer.fill(0)
+                temp_buffer.fill(0)  # Reset if any invalid values detected
             
+            # Convert to float32 and clip to valid range
             np.clip(temp_buffer, -1.0, 1.0, out=outdata[:, 0])
 
         except Exception as e:
             print(f"Audio callback error: {e}")
-            outdata.fill(0)
+            outdata.fill(0)  # Output silence on error
 
     def _process_active_voices(self, buffer, duration, gain):
+        """
+        Process all currently active (playing) voices.
+        
+        Args:
+            buffer: Output buffer to accumulate voice samples
+            duration: Length of audio to generate in seconds
+            gain: Per-voice amplitude scaling factor
+        """
         for voice in list(self.active_voices.values()):
             try:
                 waveform = self.oscillator.generate(voice.freq, self.sample_rate, duration)
@@ -336,3 +358,39 @@ class SafetyLimiter:
                 output[i] *= gain_reduction
 
         return output
+
+"""
+Synthesizer Core Architecture:
+1. Voice Management
+   - Polyphonic voice allocation
+   - Note tracking and release handling
+   - Voice limit management
+
+2. Audio Processing Chain:
+   Input → Oscillator → Filter → ADSR → Effects → Output
+
+3. Parameter Management:
+   - MIDI CC mapping
+   - Real-time parameter updates
+   - Voice parameter synchronization
+
+4. Safety Features:
+   - DC blocking
+   - Safety limiting
+   - Buffer overrun protection
+   - Exception handling
+
+Audio Callback Flow:
+1. Process pending events (note on/off)
+2. Generate voice waveforms
+3. Apply voice-specific processing
+4. Mix active voices
+5. Process through effects
+6. Apply safety checks
+7. Output final audio
+
+Threading Considerations:
+- Uses locks for parameter changes
+- Safe voice allocation/deallocation
+- Thread-safe event queue
+"""

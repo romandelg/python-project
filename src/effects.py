@@ -1,17 +1,38 @@
+"""
+Audio Effects Processing System
+-----------------------------
+Collection of real-time audio effects with modulation capabilities.
+
+Effect Chain:
+Input → [Wet Processing] → Mix with Dry → Output
+
+Common Features:
+- Dry/Wet mixing
+- Real-time parameter modulation
+- Thread-safe processing
+"""
 import numpy as np
 from audio_chain import Effect
 from terminal_display import print_effect_values
 
 class Reverb(Effect):
+    """
+    Multi-tap delay reverb simulation.
+    Uses prime-numbered delay lines for natural diffusion.
+    """
     def __init__(self):
         super().__init__("reverb")
-        self.room_size = 0.5
-        self.damping = 0.5
-        self.decay = 0.5
-        self._delay_lines = []
+        self.room_size = 0.5    # Affects delay line lengths
+        self.damping = 0.5      # High frequency absorption
+        self.decay = 0.5        # Feedback amount
+        self._delay_lines = []   # Array of delay buffers
         self._initialize_delays()
 
     def _initialize_delays(self):
+        """
+        Create delay lines with prime-number lengths.
+        Primes help prevent resonant frequency buildup.
+        """
         delay_times = [1553, 1559, 1567, 1571, 1579, 1583, 1597, 1601]  # Prime numbers
         self._delay_lines = [np.zeros(int(t)) for t in delay_times]
         self._delay_indexes = [0] * len(self._delay_lines)
