@@ -10,6 +10,7 @@ from midi_handler import MIDIHandler  # Import MIDIHandler class
 from synthesizer import Synthesizer  # Import Synthesizer class
 from event_handler import EventHandler  # Import EventHandler class
 from adsr import ADSR  # Import ADSR class
+from oscillator import Oscillator  # Import Oscillator class
 
 def main():
     synthesizer = Synthesizer()
@@ -20,6 +21,9 @@ def main():
     
     port_name = input("Enter MIDI device name (or press Enter for first available): ").strip()
     midi.start(port_name if port_name else None)
+    
+    oscillator = Oscillator()
+    oscillator.print_oscillator_bars()  # Print oscillator values on bars
 
 if __name__ == "__main__":
     main()

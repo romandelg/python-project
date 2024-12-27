@@ -47,15 +47,4 @@ class MIDIHandler:
             print("\nStopping...")
 
     def handle_control_change(self, message):
-        if message.control == 18:
-            self.adsr.set_attack(message.value / 127.0)
-        elif message.control == 19:
-            self.adsr.set_sustain(message.value / 127.0)
-        elif message.control == 20:
-            self.adsr.set_decay(message.value / 127.0)
-        elif message.control == 21:
-            self.adsr.set_release(message.value / 127.0)
-        elif message.control == 22:
-            self.filter.set_cutoff_freq(message.value * 100.0)  # Scale to 0-12700 Hz
-        elif message.control == 23:
-            self.filter.set_resonance(message.value / 127.0)
+        self.event_handler.handle_control_change(message.control, message.value)

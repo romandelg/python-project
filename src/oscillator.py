@@ -1,4 +1,5 @@
 import numpy as np
+from terminal_display import print_oscillator_bars  # Import the new function
 
 def generate_sine(frequency, sample_rate, duration):
     t = np.linspace(0, duration, int(sample_rate * duration), endpoint=False)
@@ -31,7 +32,7 @@ class Oscillator:
     
     def set_mix_level(self, osc_type, value):
         self.mix_levels[osc_type] = value / 127.0
-        self._print_mix_levels()
+        print_oscillator_bars(self.mix_levels)
 
     def _print_mix_levels(self):
         print("\n=== Oscillator Mix Levels ===")
@@ -43,6 +44,9 @@ class Oscillator:
             print(f"{osc_type:8} {percentage:3d}%  [{'█' * bars}{' ' * (20 - bars)}]")
         print("-" * 50)
         print(f"Total mix: {sum(self.mix_levels.values()):.2f}\n")
+
+    def print_oscillator_bars(self):
+        print_oscillator_bars(self.mix_levels)
 
     def generate(self, frequency, sample_rate, duration):
         sine_wave = generate_sine(frequency, sample_rate, duration)

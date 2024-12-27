@@ -1,4 +1,5 @@
 import numpy as np
+from terminal_display import print_filter_values  # Import the new function
 
 class LowPassFilter:
     def __init__(self):
@@ -9,17 +10,11 @@ class LowPassFilter:
 
     def set_cutoff_freq(self, value):
         self.cutoff_freq = value
-        self._print_filter_values()
+        print_filter_values(self.cutoff_freq, self.resonance)
 
     def set_resonance(self, value):
         self.resonance = value
-        self._print_filter_values()
-
-    def _print_filter_values(self):
-        print("\n=== Low Pass Filter Values ===")
-        print(f"Cutoff Frequency: {self.cutoff_freq:.2f} Hz")
-        print(f"Resonance: {self.resonance:.2f}")
-        print("-" * 50)
+        print_filter_values(self.cutoff_freq, self.resonance)
 
     def apply_filter(self, signal):
         alpha = self.cutoff_freq / (self.cutoff_freq + self.sample_rate)
