@@ -2,6 +2,7 @@ import numpy as np
 import sounddevice as sd
 import queue
 from oscillator import Oscillator
+from filter import LowPassFilter  # Import LowPassFilter
 
 class Synthesizer:
     def __init__(self):
@@ -16,6 +17,7 @@ class Synthesizer:
         )
         self.stream.start()
         self.oscillator = Oscillator()
+        self.filter = LowPassFilter()  # Add filter instance
 
     def note_on(self, note, velocity):
         freq = 440.0 * (2.0 ** ((note - 69) / 12.0))
@@ -56,6 +58,9 @@ class Synthesizer:
                 waveform = self.oscillator.generate(voice.freq, self.sample_rate, duration)
                 outdata[:, 0] += 0.5 * (voice.velocity / 127.0) * waveform
                 voice.phase = (voice.phase + frames) % self.sample_rate
+            
+            # Apply low pass filter
+            outdata[:, 0] = self.filter.apply_filter(outdata[:, 0])
             
             # Soft clip the final output
             outdata[:, 0] = np.tanh(outdata[:, 0])

@@ -4,12 +4,14 @@ import signal
 import sys
 from event_handler import EventHandler
 from adsr import ADSR
+from filter import LowPassFilter
 
 class MIDIHandler:    
     def __init__(self, event_handler):
         self.event_handler = event_handler
         self.running = True
         self.adsr = ADSR()
+        self.filter = LowPassFilter()
         signal.signal(signal.SIGINT, self._signal_handler)
     
     def _signal_handler(self, signum, frame):
@@ -53,3 +55,7 @@ class MIDIHandler:
             self.adsr.set_decay(message.value / 127.0)
         elif message.control == 21:
             self.adsr.set_release(message.value / 127.0)
+        elif message.control == 22:
+            self.filter.set_cutoff_freq(message.value * 100.0)  # Scale to 0-12700 Hz
+        elif message.control == 23:
+            self.filter.set_resonance(message.value / 127.0)
