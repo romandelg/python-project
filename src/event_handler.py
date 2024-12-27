@@ -12,7 +12,10 @@ class EventHandler:
             self.handle_control_change(event.control, event.value)
 
     def handle_control_change(self, control, value):
-        if control in [14, 15, 16, 17, 18, 19, 20, 21, 22, 23]:
+        if control in [14, 15, 16, 17,  # Oscillator mix
+                      26, 27, 28, 29,   # Oscillator detune
+                      18, 19, 20, 21,   # ADSR
+                      22, 23]:          # Filter
             self.synthesizer.control_change(control, value)
         else:
             self.synthesizer.oscillator.set_mix_level(control, value)

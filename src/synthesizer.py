@@ -31,24 +31,33 @@ class Synthesizer:
 
     def control_change(self, control, value):
         cc_to_osc = {
-            14: 'sine',
-            15: 'saw',
-            16: 'triangle',
-            17: 'pulse'
+            14: ('sine', 'mix'),
+            15: ('saw', 'mix'),
+            16: ('triangle', 'mix'),
+            17: ('pulse', 'mix'),
+            26: ('sine', 'detune'),    # Changed from 18
+            27: ('saw', 'detune'),     # Changed from 19
+            28: ('triangle', 'detune'), # Changed from 20
+            29: ('pulse', 'detune')     # Changed from 21
         }
+        
         if control in cc_to_osc:
-            print(f"\nReceived CC{control} [{cc_to_osc[control]}]: {value}/127 = {value/127:.2f}")
-            self.oscillator.set_mix_level(cc_to_osc[control], value)
+            osc_type, param_type = cc_to_osc[control]
+            if param_type == 'mix':
+                self.oscillator.set_mix_level(osc_type, value)
+            else:  # detune
+                self.oscillator.set_detune(osc_type, value)
         elif control == 22:
-            self.filter.set_cutoff_freq(value * 100.0)  # Scale to 0-12700 Hz
+            self.filter.set_cutoff_freq(value * 100.0)
         elif control == 23:
             self.filter.set_resonance(value / 127.0)
-        elif control in [18, 19, 20, 21]:
+        elif control in [18, 19, 20, 21]:  # ADSR controls
             self.adsr_control_change(control, value)
 
         # Print all values
         print_all_values(
             self.oscillator.mix_levels,
+            self.oscillator.detune_values,  # Include detune values
             self.filter.cutoff_freq,
             self.filter.resonance,
             self.adsr.attack,

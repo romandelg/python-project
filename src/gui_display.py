@@ -37,7 +37,9 @@ class SynthesizerGUI:
             bar.grid(row=i, column=1, padx=5)
             value_label = ttk.Label(self.osc_frame, text="0.00")
             value_label.grid(row=i, column=2, padx=5)
-            bars[label] = (bar, value_label)
+            detune_label = ttk.Label(self.osc_frame, text="±0.00st")
+            detune_label.grid(row=i, column=3, padx=5)
+            bars[label] = (bar, value_label, detune_label)
         return bars
 
     def _create_filter_section(self):
@@ -66,15 +68,16 @@ class SynthesizerGUI:
             controls[label.lower()] = (bar, value_label)
         return controls
 
-    def update_oscillator(self, mix_levels):
-        self.root.after(0, self._update_oscillator, mix_levels)
+    def update_oscillator(self, mix_levels, detune_values):
+        self.root.after(0, self._update_oscillator, mix_levels, detune_values)
         
-    def _update_oscillator(self, mix_levels):
+    def _update_oscillator(self, mix_levels, detune_values):
         for osc_type, level in mix_levels.items():
             if osc_type in self.osc_bars:
-                bar, label = self.osc_bars[osc_type]
+                bar, level_label, detune_label = self.osc_bars[osc_type]
                 bar['value'] = level * 100
-                label['text'] = f"{level:.2f}"
+                level_label['text'] = f"{level:.2f}"
+                detune_label['text'] = f"±{abs(detune_values[osc_type]):.2f}st"
 
     def update_filter(self, cutoff_freq, resonance):
         self.root.after(0, self._update_filter, cutoff_freq, resonance)
