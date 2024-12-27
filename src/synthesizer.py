@@ -1,6 +1,7 @@
 import numpy as np
 import sounddevice as sd
 import queue
+import copy
 from oscillator import Oscillator
 from filter import LowPassFilter
 from adsr import ADSR
@@ -35,6 +36,7 @@ class Synthesizer:
     def __init__(self):
         self.sample_rate = 44100
         self.active_voices = {}
+        self.released_voices = {}  # Store voices that are in release phase
         self.event_queue = queue.Queue()
         self.stream = sd.OutputStream(
             channels=1,
@@ -54,13 +56,37 @@ class Synthesizer:
         self.audio_chain.add_module(FilterModule(self.filter))
         self.audio_chain.add_module(ADSRModule(self.adsr))
         
+        # Create template audio chain for voices
+        self.voice_chain_template = AudioChainHandler()
+        self.voice_chain_template.add_module(OscillatorModule(self.oscillator))
+        self.voice_chain_template.add_module(FilterModule(self.filter))
+        
+        # Global effects chain
+        self.effects_chain = AudioChainHandler()
+        
+        # Initialize modulation sources
+        self.mod_sources = {
+            'lfo1': 0.0,
+            'lfo2': 0.0,
+            'env1': 0.0,
+            'env2': 0.0,
+        }
+        
         self.stream.start()
 
     def note_on(self, note):
         freq = 440.0 * (2.0 ** ((note - 69) / 12.0))
+        voice = Voice(freq)
+        # Create a copy of the voice chain for this voice
+        voice.audio_chain = copy.deepcopy(self.voice_chain_template)
+        self.active_voices[note] = voice
         self.event_queue.put(('note_on', note, freq))
 
     def note_off(self, note):
+        if note in self.active_voices:
+            voice = self.active_voices.pop(note)
+            voice.release_triggered = True
+            self.released_voices[note] = voice
         self.event_queue.put(('note_off', note))
 
     def control_change(self, control, value):
@@ -104,27 +130,55 @@ class Synthesizer:
 
     def audio_callback(self, outdata, frames, time, status):
         outdata.fill(0)
+        temp_buffer = np.zeros_like(outdata[:, 0])
+        
+        # Process events
         while not self.event_queue.empty():
             event = self.event_queue.get()
             if event[0] == 'note_on':
                 _, note, freq = event
-                if note not in self.active_voices:
-                    self.active_voices[note] = Voice(freq)
-            elif event[0] == 'note_off' and event[1] in self.active_voices:
-                del self.active_voices[event[1]]
+                self.adsr.note_on()
+            elif event[0] == 'note_off':
+                _, note = event
+                self.adsr.note_off()
 
-        if self.active_voices:
-            for voice in self.active_voices.values():
-                duration = frames / self.sample_rate
-                waveform = self.oscillator.generate(voice.freq, self.sample_rate, duration)
-                outdata[:, 0] += 0.5 * waveform
-                voice.phase = (voice.phase + frames) % self.sample_rate
+        # Process each voice separately
+        if self.active_voices or self.released_voices:
+            duration = frames / self.sample_rate
             
-            # Process through audio chain
-            outdata[:, 0] = self.audio_chain.process_audio(outdata[:, 0])
-            outdata[:, 0] = np.tanh(outdata[:, 0])  # Soft clipping
+            # Process active voices
+            for voice in self.active_voices.values():
+                # Generate base waveform
+                waveform = self.oscillator.generate(voice.freq, self.sample_rate, duration)
+                # Process through voice's audio chain
+                processed = voice.audio_chain.process_voice(voice, waveform)
+                temp_buffer += processed
+            
+            # Process released voices similarly
+            released_done = []
+            for note, voice in self.released_voices.items():
+                waveform = self.oscillator.generate(voice.freq, self.sample_rate, duration)
+                temp_buffer += voice.audio_chain.process_voice(voice, waveform)
+                voice.phase = (voice.phase + frames) % self.sample_rate
+                
+                if not voice.active:  # Voice finished release phase
+                    released_done.append(note)
+            
+            # Remove finished voices
+            for note in released_done:
+                del self.released_voices[note]
+            
+            # Process through global effects chain
+            temp_buffer = self.effects_chain.process_audio(temp_buffer)
+            
+            # Apply final mixing
+            outdata[:, 0] = np.tanh(temp_buffer * 0.5)  # Soft clipping
 
 class Voice:
     def __init__(self, freq):
         self.freq = freq
         self.phase = 0.0
+        self.active = True
+        self.release_triggered = False
+        self.adsr = ADSR()  # Each voice gets its own ADSR
+        self.audio_chain = None  # Will be set to a copy of the main chain

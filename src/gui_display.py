@@ -1,6 +1,7 @@
 import tkinter as tk
 from tkinter import ttk
 import queue
+import time
 
 class SynthesizerGUI:
     def __init__(self):
@@ -18,6 +19,8 @@ class SynthesizerGUI:
         self.filter_bars = self._create_filter_section()
         self.adsr_bars = self._create_adsr_section()
         self.running = True
+        self.last_update = time.time()
+        self.update_interval = 1/30  # 30 FPS max
 
     def on_closing(self):
         self.running = False
@@ -77,17 +80,25 @@ class SynthesizerGUI:
         return controls
 
     def process_updates(self):
-        try:
-            while True:
-                update_type, args = self.update_queue.get_nowait()
-                if update_type == 'oscillator':
-                    self._update_oscillator(*args)
-                elif update_type == 'filter':
-                    self._update_filter(*args)
-                elif update_type == 'adsr':
-                    self._update_adsr(*args)
-        except queue.Empty:
-            pass
+        current_time = time.time()
+        if current_time - self.last_update >= self.update_interval:
+            updates = {}
+            try:
+                while True:
+                    update_type, args = self.update_queue.get_nowait()
+                    updates[update_type] = args
+            except queue.Empty:
+                pass
+
+            if 'oscillator' in updates:
+                self._update_oscillator(*updates['oscillator'])
+            if 'filter' in updates:
+                self._update_filter(*updates['filter'])
+            if 'adsr' in updates:
+                self._update_adsr(*updates['adsr'])
+
+            self.last_update = current_time
+
         if self.running:
             self.root.after(10, self.process_updates)
 
