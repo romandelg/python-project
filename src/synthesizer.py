@@ -92,6 +92,7 @@ class Synthesizer:
         self.voice_lock = threading.Lock()
         
         self.stream.start()
+        self.voice_gain = 0.5  # Add gain control
 
     def note_on(self, note):
         freq = 440.0 * (2.0 ** ((note - 69) / 12.0))
@@ -124,10 +125,22 @@ class Synthesizer:
                         self.oscillator.set_mix_level(osc_type, value)
                     else:
                         self.oscillator.set_detune(osc_type, value)
-                elif control == 22:
-                    self.filter.set_cutoff_freq(value * 100.0)
-                elif control == 23:
-                    self.filter.set_resonance(value / 127.0)
+                elif control == 22:  # Filter cutoff
+                    cutoff = 20.0 * np.exp(np.log(1000) * value / 127.0)
+                    self.filter.set_cutoff_freq(cutoff)
+                    # Update all voice filters
+                    for voice in self.active_voices.values():
+                        voice.filter.set_cutoff_freq(cutoff)
+                    for voice in self.released_voices.values():
+                        voice.filter.set_cutoff_freq(cutoff)
+                elif control == 23:  # Filter resonance
+                    resonance = 0.1 + (9.9 * value / 127.0)
+                    self.filter.set_resonance(resonance)
+                    # Update all voice filters
+                    for voice in self.active_voices.values():
+                        voice.filter.set_resonance(resonance)
+                    for voice in self.released_voices.values():
+                        voice.filter.set_resonance(resonance)
                 elif control in [18, 19, 20, 21]:
                     self.adsr_control_change(control, value)
 
@@ -173,7 +186,7 @@ class Synthesizer:
     def audio_callback(self, outdata, frames, time, status):
         try:
             outdata.fill(0)
-            temp_buffer = np.zeros_like(outdata[:, 0])
+            temp_buffer = np.zeros_like(outdata[:, 0], dtype=np.float64)  # Use double precision
             
             # Process events with lock
             while not self.event_queue.empty():
@@ -190,6 +203,8 @@ class Synthesizer:
             with self.voice_lock:
                 if self.active_voices or self.released_voices:
                     duration = frames / self.sample_rate
+                    active_voice_count = len(self.active_voices) + len(self.released_voices)
+                    voice_gain = self.voice_gain / max(1, np.sqrt(active_voice_count))
                     
                     # Process active voices
                     for voice in list(self.active_voices.values()):
@@ -197,11 +212,13 @@ class Synthesizer:
                             waveform = self.oscillator.generate(voice.freq, self.sample_rate, duration)
                             processed = voice.audio_chain.process_voice(voice, waveform)
                             processed = voice.adsr.apply_envelope(processed)
+                            # Apply gain and clip
+                            processed = np.clip(processed * voice_gain, -1.0, 1.0)
                             temp_buffer += processed
                         except Exception as e:
                             print(f"Voice processing error: {e}")
                     
-                    # Process released voices
+                    # Process released voices with same gain handling
                     released_done = []
                     for note, voice in self.released_voices.items():
                         try:
@@ -212,14 +229,14 @@ class Synthesizer:
                             waveform = self.oscillator.generate(voice.freq, self.sample_rate, duration)
                             processed = voice.audio_chain.process_voice(voice, waveform)
                             processed = voice.adsr.apply_envelope(processed)
+                            processed = np.clip(processed * voice_gain, -1.0, 1.0)
                             temp_buffer += processed
                         except Exception as e:
                             print(f"Released voice processing error: {e}")
                             released_done.append(note)
 
-                    # Remove finished voices
-                    for note in released_done:
-                        self.released_voices.pop(note, None)
+                    # Normalize summed output
+                    temp_buffer = np.clip(temp_buffer, -1.0, 1.0)
 
             # Process through effects chain with parameter lock
             with self.param_lock:
@@ -228,9 +245,8 @@ class Synthesizer:
                 except Exception as e:
                     print(f"Effects processing error: {e}")
 
-            # Apply final mixing
-            np.clip(temp_buffer, -1.0, 1.0, out=temp_buffer)
-            outdata[:, 0] = temp_buffer
+            # Final output processing
+            np.clip(temp_buffer, -1.0, 1.0, out=outdata[:, 0])
 
         except Exception as e:
             print(f"Audio callback error: {e}")
@@ -248,6 +264,7 @@ class Voice:
         self.active = True
         self.release_triggered = False
         self.adsr = ADSR()
+        self.filter = LowPassFilter()  # Each voice gets its own filter instance
         self.audio_chain = self._create_chain(template_chain)
         self.note_on_time = time.time()
 
@@ -257,12 +274,12 @@ class Voice:
             return None
         
         chain = AudioChainHandler()
-        # Copy modules without their locks
+        # Copy modules with their own filter instances
         for module in template.chain:
             if isinstance(module, OscillatorModule):
                 chain.add_module(OscillatorModule(module.oscillator))
             elif isinstance(module, FilterModule):
-                chain.add_module(FilterModule(module.filter))
+                chain.add_module(FilterModule(self.filter))  # Use voice's filter
             elif isinstance(module, ADSRModule):
                 chain.add_module(ADSRModule(self.adsr))
         return chain
