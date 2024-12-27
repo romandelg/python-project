@@ -5,6 +5,31 @@ from oscillator import Oscillator
 from filter import LowPassFilter
 from adsr import ADSR
 from terminal_display import print_all_values
+from audio_chain import AudioChainHandler, AudioModule
+
+class OscillatorModule(AudioModule):
+    def __init__(self, oscillator):
+        super().__init__("oscillator")
+        self.oscillator = oscillator
+
+    def _process_audio(self, signal):
+        return signal  # The oscillator generates rather than processes
+
+class FilterModule(AudioModule):
+    def __init__(self, filter):
+        super().__init__("filter")
+        self.filter = filter
+
+    def _process_audio(self, signal):
+        return self.filter.apply_filter(signal)
+
+class ADSRModule(AudioModule):
+    def __init__(self, adsr):
+        super().__init__("adsr")
+        self.adsr = adsr
+
+    def _process_audio(self, signal):
+        return self.adsr.apply_envelope(signal)
 
 class Synthesizer:
     def __init__(self):
@@ -17,12 +42,21 @@ class Synthesizer:
             samplerate=self.sample_rate,
             blocksize=256
         )
-        self.stream.start()
+        
+        # Initialize components
         self.oscillator = Oscillator()
         self.filter = LowPassFilter()
         self.adsr = ADSR()
+        
+        # Setup audio chain
+        self.audio_chain = AudioChainHandler()
+        self.audio_chain.add_module(OscillatorModule(self.oscillator))
+        self.audio_chain.add_module(FilterModule(self.filter))
+        self.audio_chain.add_module(ADSRModule(self.adsr))
+        
+        self.stream.start()
 
-    def note_on(self, note, velocity):
+    def note_on(self, note):
         freq = 440.0 * (2.0 ** ((note - 69) / 12.0))
         self.event_queue.put(('note_on', note, freq))
 
@@ -85,8 +119,10 @@ class Synthesizer:
                 waveform = self.oscillator.generate(voice.freq, self.sample_rate, duration)
                 outdata[:, 0] += 0.5 * waveform
                 voice.phase = (voice.phase + frames) % self.sample_rate
-            outdata[:, 0] = self.filter.apply_filter(outdata[:, 0])
-            outdata[:, 0] = np.tanh(outdata[:, 0])
+            
+            # Process through audio chain
+            outdata[:, 0] = self.audio_chain.process_audio(outdata[:, 0])
+            outdata[:, 0] = np.tanh(outdata[:, 0])  # Soft clipping
 
 class Voice:
     def __init__(self, freq):

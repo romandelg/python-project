@@ -5,7 +5,7 @@ class EventHandler:
 
     def handle_event(self, event):
         if event.type == 'note_on':
-            self.synthesizer.note_on(event.note, event.velocity)
+            self.synthesizer.note_on(event.note)  # Remove velocity parameter
         elif event.type == 'note_off':
             self.synthesizer.note_off(event.note)
         elif event.type == 'control_change':

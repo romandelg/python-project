@@ -1,9 +1,11 @@
 import tkinter as tk
 from tkinter import ttk
+import queue
 
 class SynthesizerGUI:
     def __init__(self):
         self.root = tk.Tk()
+        self.update_queue = queue.Queue()
         self.root.title("Synthesizer Parameters")
         self.root.geometry("600x800")
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
@@ -15,10 +17,18 @@ class SynthesizerGUI:
         self.osc_bars = self._create_osc_section()
         self.filter_bars = self._create_filter_section()
         self.adsr_bars = self._create_adsr_section()
+        self.running = True
 
     def on_closing(self):
-        self.root.quit()
-        self.root.destroy()
+        self.running = False
+        try:
+            self.root.quit()
+            self.root.destroy()
+        except:
+            pass
+
+    def is_running(self):
+        return self.running
 
     def _create_section_frame(self, title):
         frame = ttk.LabelFrame(self.root, text=title, padding="10")
@@ -66,8 +76,23 @@ class SynthesizerGUI:
             controls[label.lower()] = (bar, value_label)
         return controls
 
+    def process_updates(self):
+        try:
+            while True:
+                update_type, args = self.update_queue.get_nowait()
+                if update_type == 'oscillator':
+                    self._update_oscillator(*args)
+                elif update_type == 'filter':
+                    self._update_filter(*args)
+                elif update_type == 'adsr':
+                    self._update_adsr(*args)
+        except queue.Empty:
+            pass
+        if self.running:
+            self.root.after(10, self.process_updates)
+
     def update_oscillator(self, mix_levels, detune_values):
-        self.root.after(0, self._update_oscillator, mix_levels, detune_values)
+        self.update_queue.put(('oscillator', (mix_levels, detune_values)))
         
     def _update_oscillator(self, mix_levels, detune_values):
         for osc_type, level in mix_levels.items():
@@ -78,7 +103,7 @@ class SynthesizerGUI:
                 detune_label['text'] = f"±{abs(detune_values[osc_type]):.2f}st"
 
     def update_filter(self, cutoff_freq, resonance):
-        self.root.after(0, self._update_filter, cutoff_freq, resonance)
+        self.update_queue.put(('filter', (cutoff_freq, resonance)))
         
     def _update_filter(self, cutoff_freq, resonance):
         self.filter_bars['cutoff'][0]['value'] = (cutoff_freq / 12700) * 100
@@ -87,7 +112,7 @@ class SynthesizerGUI:
         self.filter_bars['resonance'][1]['text'] = f"{resonance:.2f}"
 
     def update_adsr(self, attack, decay, sustain, release):
-        self.root.after(0, self._update_adsr, attack, decay, sustain, release)
+        self.update_queue.put(('adsr', (attack, decay, sustain, release)))
         
     def _update_adsr(self, attack, decay, sustain, release):
         values = {'attack': attack, 'decay': decay, 'sustain': sustain, 'release': release}
@@ -97,4 +122,5 @@ class SynthesizerGUI:
             label['text'] = f"{value:.2f}"
 
     def start(self):
+        self.process_updates()  # Start processing updates
         self.root.mainloop()

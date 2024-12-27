@@ -11,7 +11,8 @@ from synthesizer import Synthesizer  # Import Synthesizer class
 from event_handler import EventHandler  # Import EventHandler class
 from adsr import ADSR  # Import ADSR class
 from oscillator import Oscillator  # Import Oscillator class
-from terminal_display import start_gui  # Import start_gui function
+from gui_display import SynthesizerGUI  # Import SynthesizerGUI class
+from terminal_display import TerminalDisplay  # Import TerminalDisplay class
 
 def midi_handler_thread(midi_handler, port_name):
     midi_handler.start(port_name if port_name else None)
@@ -29,8 +30,24 @@ def main():
     midi_thread = threading.Thread(target=midi_handler_thread, args=(midi, port_name), daemon=True)
     midi_thread.start()
     
-    # Start GUI in the main thread
-    start_gui()
+    # Create and start GUI in the main thread
+    gui = SynthesizerGUI()
+    TerminalDisplay.set_gui(gui)  # Set GUI instance for terminal display
+    
+    # Add a cleanup handler
+    def on_closing():
+        print("\nShutting down...")
+        midi.running = False
+        gui.on_closing()
+        sys.exit(0)
+    
+    gui.root.protocol("WM_DELETE_WINDOW", on_closing)
+    
+    # Start GUI mainloop in main thread
+    try:
+        gui.start()
+    except KeyboardInterrupt:
+        on_closing()
 
 if __name__ == "__main__":
     main()

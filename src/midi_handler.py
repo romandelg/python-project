@@ -44,7 +44,11 @@ class MIDIHandler:
                             self.handle_control_change(message)
                     time.sleep(0.001)
         except KeyboardInterrupt:
+            self.running = False
             print("\nStopping...")
+        except Exception as e:
+            print(f"MIDI Error: {e}")
+            self.running = False
 
     def handle_control_change(self, message):
         self.event_handler.handle_control_change(message.control, message.value)
