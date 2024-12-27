@@ -34,7 +34,7 @@ class MIDIHandler:
                 print("Press Ctrl+C to stop...")
                 while self.running:
                     for message in midi_port.iter_pending():
-                        if message.type in ['note_on', 'note_off']:
+                        if message.type in ['note_on', 'note_off', 'control_change']:
                             self.event_handler.handle_event(message)
                     time.sleep(0.001)
         except KeyboardInterrupt:

@@ -7,3 +7,5 @@ class EventHandler:
             self.synthesizer.note_on(event.note, event.velocity)
         elif event.type == 'note_off':
             self.synthesizer.note_off(event.note)
+        elif event.type == 'control_change':
+            self.synthesizer.control_change(event.control, event.value)
