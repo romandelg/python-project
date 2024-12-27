@@ -17,8 +17,8 @@ Waveform Generation System:
    - Phase tracking
 """
 import numpy as np
-from terminal_display import print_oscillator_bars
 from functools import lru_cache
+from .terminal_display import print_oscillator_bars
 
 @lru_cache(maxsize=1024)
 def _generate_base_waveform(wave_type, size):

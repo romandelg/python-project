@@ -1,30 +1,36 @@
-"""
-Main Entry Point and Program Flow:
-1. Initialize core components (Synthesizer, MIDI handler, GUI)
-2. Start MIDI listening thread (non-blocking)
-3. Start GUI in main thread
-4. Handle program shutdown
+"""Main Entry Point and Program Flow"""
 
-Threading Architecture:
-- Main Thread: GUI and user interface
-- MIDI Thread: MIDI input processing
-- Audio Thread: Sound generation (managed by sounddevice)
-"""
-# Import necessary libraries
-import mido  # Library for working with MIDI messages
-import numpy as np  # Library for numerical operations
-import sounddevice as sd  # Library for audio playback
-import threading  # Library for threading
-import time  # Library for time-related functions
-import signal  # Library for handling signals
-import sys  # Library for system-specific parameters and functions
-from midi_handler import MIDIHandler  # Import MIDIHandler class
-from synthesizer import Synthesizer  # Import Synthesizer class
-from event_handler import EventHandler  # Import EventHandler class
-from adsr import ADSR  # Import ADSR class
-from oscillator import Oscillator  # Import Oscillator class
-from gui_display import SynthesizerGUI  # Import SynthesizerGUI class
-from terminal_display import TerminalDisplay  # Import TerminalDisplay class
+# Ensure all required packages are installed
+try:
+    import mido
+    import numpy as np
+    import sounddevice as sd
+except ImportError as e:
+    print(f"Missing required package: {e}")
+    print("Please install required packages using:")
+    print("pip install mido numpy sounddevice")
+    exit(1)
+
+# Standard library imports
+import threading
+import time
+import signal
+import sys
+import os
+
+# Add project root to Python path
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if project_root not in sys.path:
+    sys.path.append(project_root)
+
+# Local imports using relative imports
+from .synthesizer import Synthesizer
+from .midi_handler import MIDIHandler
+from .event_handler import EventHandler
+from .adsr import ADSR
+from .oscillator import Oscillator
+from .gui_display import SynthesizerGUI
+from .terminal_display import TerminalDisplay, start_gui
 
 def midi_handler_thread(midi_handler, port_name):
     midi_handler.start(port_name if port_name else None)

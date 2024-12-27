@@ -1,5 +1,5 @@
 import numpy as np
-from terminal_display import print_filter_values
+from .terminal_display import print_filter_values
 
 class LowPassFilter:
     """

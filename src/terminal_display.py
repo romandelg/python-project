@@ -1,5 +1,3 @@
-from gui_display import SynthesizerGUI
-
 class TerminalDisplay:
     _instance = None
     _gui = None
@@ -47,6 +45,8 @@ def print_all_values(*args):
     terminal_display.print_all_values(*args)
 
 def start_gui():
+    # Lazy import to avoid circular dependency
+    from .gui_display import SynthesizerGUI
     gui = SynthesizerGUI()
     TerminalDisplay.set_gui(gui)
     gui.start()

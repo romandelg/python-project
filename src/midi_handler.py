@@ -2,9 +2,11 @@ import mido
 import time
 import signal
 import sys
-from event_handler import EventHandler
-from adsr import ADSR
-from filter import LowPassFilter
+
+# Fix imports to use absolute paths
+from src.event_handler import EventHandler
+from src.adsr import ADSR
+from src.filter import LowPassFilter
 
 """
 MIDI Input Processing:

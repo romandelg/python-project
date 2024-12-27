@@ -4,12 +4,14 @@ import queue
 import copy
 import time
 import threading
-from oscillator import Oscillator
-from filter import LowPassFilter
-from adsr import ADSR
-from terminal_display import print_all_values
-from audio_chain import AudioChainHandler, AudioModule
-from effects import Reverb, Distortion, Delay, Flanger, Chorus
+
+# Use relative imports
+from .oscillator import Oscillator
+from .filter import LowPassFilter
+from .adsr import ADSR
+from .terminal_display import print_all_values
+from .audio_chain import AudioChainHandler, AudioModule
+from .effects import Reverb, Distortion, Delay, Flanger, Chorus
 
 class OscillatorModule(AudioModule):
     def __init__(self, oscillator):
@@ -17,7 +19,7 @@ class OscillatorModule(AudioModule):
         self.oscillator = oscillator
 
     def _process_audio(self, signal):
-        return signal  # The oscillator generates rather than processes
+        return signal
 
 class FilterModule(AudioModule):
     def __init__(self, filter):
@@ -43,16 +45,18 @@ class Synthesizer:
     def __init__(self):
         # Audio settings
         self.sample_rate = 44100  # Standard audio sample rate
+        self.buffer_size = 256    # Add this line to fix the error
         self.active_voices = {}   # Currently playing notes
         self.released_voices = {} # Notes in release phase
         self.event_queue = queue.Queue()  # Thread-safe event queue
+        self.running = True       # Add this line for process_audio loop control
         
         # Initialize audio output stream
         self.stream = sd.OutputStream(
             channels=1,           # Mono output
             callback=self.audio_callback,
             samplerate=self.sample_rate,
-            blocksize=256        # Small buffer for low latency
+            blocksize=self.buffer_size  # Use buffer_size here
         )
         
         # Core synthesizer components
@@ -216,41 +220,29 @@ class Synthesizer:
             status: Stream status flags
         """
         try:
-            outdata.fill(0)  # Initialize output buffer to silence
-            # Use double precision for better numerical stability
+            outdata.fill(0)
             temp_buffer = np.zeros_like(outdata[:, 0], dtype=np.float64)
             
-            # Handle pending MIDI and parameter change events
-            while not self.event_queue.empty():
-                # ...existing event processing...
-
-            # Voice processing section
-            with self.voice_lock:  # Thread-safe voice updates
+            with self.voice_lock:
                 if self.active_voices or self.released_voices:
-                    # Calculate per-voice gain based on total voice count
                     duration = frames / self.sample_rate
                     active_voice_count = len(self.active_voices) + len(self.released_voices)
                     voice_gain = self.voice_gain / max(1, np.sqrt(active_voice_count))
-
-                    # Process currently playing voices
+                    
                     self._process_active_voices(temp_buffer, duration, voice_gain)
-                    # Process voices in release phase
                     self._process_released_voices(temp_buffer, duration, voice_gain)
                     
-                    # Signal conditioning
-                    temp_buffer = self.dc_block.process(temp_buffer)  # Remove DC offset
-                    temp_buffer = self.safety_limiter.process(temp_buffer)  # Prevent clipping
-
-            # Final safety checks and output
-            if np.any(np.isnan(temp_buffer)) or np.any(np.isinf(temp_buffer)):
-                temp_buffer.fill(0)  # Reset if any invalid values detected
+                    temp_buffer = self.dc_block.process(temp_buffer)
+                    temp_buffer = self.safety_limiter.process(temp_buffer)
             
-            # Convert to float32 and clip to valid range
+            if np.any(np.isnan(temp_buffer)) or np.any(np.isinf(temp_buffer)):
+                temp_buffer.fill(0)
+            
             np.clip(temp_buffer, -1.0, 1.0, out=outdata[:, 0])
-
+            
         except Exception as e:
             print(f"Audio callback error: {e}")
-            outdata.fill(0)  # Output silence on error
+            outdata.fill(0)
 
     def _process_active_voices(self, buffer, duration, gain):
         """
@@ -293,6 +285,38 @@ class Synthesizer:
         if effect_name in self.effects:
             self.effects[effect_name].enabled = enabled
             print_effect_values(effect_name, enabled, self.effects[effect_name].wet)
+
+    def process_audio(self):
+        """Process audio in a thread-safe manner"""
+        while self.running:
+            try:
+                mixed_output = np.zeros(self.buffer_size)
+                
+                with self.voice_lock:
+                    # Process active voices
+                    for voice in self.active_voices:
+                        if voice.playing:
+                            voice_output = np.zeros(self.buffer_size)
+                            mixed_output += voice_output
+                    
+                    # Normalize if needed
+                    if len(self.active_voices) > 0:
+                        mixed_output /= len(self.active_voices)
+                    
+                    # Process through effects chain
+                    if self.effects_chain:
+                        mixed_output = self.effects_chain.process(mixed_output)
+                
+                # Yield the mixed output outside the lock
+                yield mixed_output
+                
+            except Exception as e:
+                print(f"Process audio error: {e}")
+                yield np.zeros(self.buffer_size)
+
+    def stop(self):
+        """Safely stop audio processing"""
+        self.running = False
 
 class Voice:
     def __init__(self, freq, template_chain=None):

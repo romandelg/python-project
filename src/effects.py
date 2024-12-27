@@ -15,6 +15,24 @@ import numpy as np
 from audio_chain import Effect
 from terminal_display import print_effect_values
 
+from src.audio_chain import AudioModule
+
+class Effect(AudioModule):
+    def __init__(self, name):
+        super().__init__(name)
+        self.wet = 0.0
+        self.dry = 1.0
+        self.enabled = True
+
+    def process(self, signal):
+        if not self.enabled:
+            return signal
+        effect_signal = self._process_effect(signal)
+        return (signal * self.dry) + (effect_signal * self.wet)
+
+    def _process_effect(self, signal):
+        raise NotImplementedError
+
 class Reverb(Effect):
     """
     Multi-tap delay reverb simulation.

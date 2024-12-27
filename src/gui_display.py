@@ -2,6 +2,7 @@ import tkinter as tk
 from tkinter import ttk
 import queue
 import time
+from .terminal_display import TerminalDisplay
 
 """
 GUI System Architecture:
@@ -37,7 +38,7 @@ class SynthesizerGUI:
     def __init__(self):
         self.root = tk.Tk()
         self.update_queue = queue.Queue()
-        self.root.title("Synthesizer Parameters")
+        self.root.title("Event-Driven Synthesizer")
         self.root.geometry("600x800")
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
         
@@ -216,3 +217,7 @@ class SynthesizerGUI:
     def start(self):
         self.process_updates()  # Start processing updates
         self.root.mainloop()
+
+    def update_display(self, data):
+        # Update GUI elements with new data
+        pass
