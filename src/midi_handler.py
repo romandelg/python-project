@@ -1,16 +1,9 @@
-# Import necessary libraries
 import mido  # Library for working with MIDI messages
-import numpy as np  # Library for numerical operations
-import sounddevice as sd  # Library for audio playback
-import threading  # Library for threading
 import time  # Library for time-related functions
 import signal  # Library for handling signals
 import sys  # Library for system-specific parameters and functions
-from midi_handler import MIDIHandler  # Import MIDIHandler class
-from synthesizer import Synthesizer  # Import Synthesizer class
 from event_handler import EventHandler  # Import EventHandler class
 
-# Define a class to handle MIDI input
 class MIDIHandler:
     # Array of note names for converting MIDI numbers to musical notation
     NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
@@ -27,10 +20,6 @@ class MIDIHandler:
     def _signal_handler(self, signum, frame):
         print("\nShutting down...")
         self.running = False
-        # Stop and close the audio stream if it is running
-        if hasattr(self.event_handler, 'synth') and self.event_handler.synth.stream:
-            self.event_handler.synth.stream.stop()
-            self.event_handler.synth.stream.close()
         sys.exit(0)
     
     # Convert MIDI note number to musical notation (e.g., C4, A#3)
@@ -67,26 +56,8 @@ class MIDIHandler:
                     time.sleep(0.001)
         except KeyboardInterrupt:
             print("\nStopping...")
-        finally:
-            # Stop and close the audio stream if it is running
-            if hasattr(self.event_handler, 'synth') and self.event_handler.synth.stream:
-                self.event_handler.synth.stream.stop()
-                self.event_handler.synth.stream.close()
-            
+    
     # Process incoming MIDI messages
     def _handle_message(self, message):
-        self.event_handler.handle_event(message)
-
-# Main function to initialize and start MIDI handling
-def main():
-    synthesizer = Synthesizer()
-    event_handler = EventHandler(synthesizer)
-    midi = MIDIHandler(event_handler)
-    midi.scan_devices()
-    
-    port_name = input("Enter MIDI device name (or press Enter for first available): ").strip()
-    midi.start(port_name if port_name else None)
-
-# Entry point of the script
-if __name__ == "__main__":
-    main()
+        if message.type == 'note_on' or message.type == 'note_off':
+            self.event_handler.handle_event(message)
