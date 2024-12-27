@@ -1,6 +1,7 @@
 import numpy as np
 from dataclasses import dataclass
 from typing import Dict, Any, Callable
+import threading
 
 @dataclass
 class ModulationTarget:
@@ -60,9 +61,10 @@ class ADSRModule(AudioModule):
 class AudioChainHandler:
     def __init__(self):
         self.chain = []
-        self.mod_matrix = {}  # source -> [(target_module, target_param, amount)]
+        self.mod_matrix = {}
         self._buffer = None
         self.effects_chain = []
+        self.processing_lock = threading.Lock()
 
     def add_module(self, module, position=None):
         if position is None:
@@ -114,22 +116,30 @@ class AudioChainHandler:
         return result
 
     def process_audio(self, signal):
-        if not self.chain:
-            return signal
+        with self.processing_lock:
+            try:
+                if not self.chain:
+                    return signal
 
-        if self._buffer is None or len(self._buffer) != len(signal):
-            self._buffer = np.zeros_like(signal)
+                if self._buffer is None or len(self._buffer) != len(signal):
+                    self._buffer = np.zeros_like(signal)
 
-        # Process only enabled and non-bypassed modules
-        active_modules = [m for m in self.chain if m.enabled and not m.bypass]
-        if not active_modules:
-            return signal
+                active_modules = [m for m in self.chain if m.enabled and not m.bypass]
+                if not active_modules:
+                    return signal
 
-        np.copyto(self._buffer, signal)
-        for module in active_modules:
-            self._buffer = module.process(self._buffer)
-        
-        return self._buffer
+                np.copyto(self._buffer, signal)
+                for module in active_modules:
+                    try:
+                        self._buffer = module.process(self._buffer)
+                    except Exception as e:
+                        print(f"Module processing error: {e}")
+                        continue
+                
+                return self._buffer
+            except Exception as e:
+                print(f"Audio chain processing error: {e}")
+                return signal
 
     def bypass_module(self, module_name, bypass=True):
         module = self.get_module(module_name)

@@ -2,11 +2,14 @@ import numpy as np
 import sounddevice as sd
 import queue
 import copy
+import time
+import threading
 from oscillator import Oscillator
 from filter import LowPassFilter
 from adsr import ADSR
 from terminal_display import print_all_values
 from audio_chain import AudioChainHandler, AudioModule
+from effects import Reverb, Distortion, Delay, Flanger, Chorus
 
 class OscillatorModule(AudioModule):
     def __init__(self, oscillator):
@@ -72,40 +75,79 @@ class Synthesizer:
             'env2': 0.0,
         }
         
+        # Initialize effects
+        self.effects = {
+            'reverb': Reverb(),
+            'distortion': Distortion(),
+            'delay': Delay(),
+            'flanger': Flanger(),
+            'chorus': Chorus()
+        }
+        
+        # Add effects to chain
+        for effect in self.effects.values():
+            self.effects_chain.add_effect(effect)
+        
+        self.param_lock = threading.Lock()
+        self.voice_lock = threading.Lock()
+        
         self.stream.start()
 
     def note_on(self, note):
         freq = 440.0 * (2.0 ** ((note - 69) / 12.0))
-        voice = Voice(freq)
-        # Create a copy of the voice chain for this voice
-        voice.audio_chain = copy.deepcopy(self.voice_chain_template)
-        self.active_voices[note] = voice
+        # Create voice with template chain
+        voice = Voice(freq, self.voice_chain_template)
+        voice.adsr.note_on()  # Initialize ADSR state
+        with self.voice_lock:
+            self.active_voices[note] = voice
         self.event_queue.put(('note_on', note, freq))
 
     def note_off(self, note):
         if note in self.active_voices:
             voice = self.active_voices.pop(note)
             voice.release_triggered = True
+            voice.adsr.note_off()  # Trigger release phase
             self.released_voices[note] = voice
         self.event_queue.put(('note_off', note))
 
     def control_change(self, control, value):
-        cc_to_osc = {
-            14: ('sine', 'mix'), 15: ('saw', 'mix'), 16: ('triangle', 'mix'), 17: ('pulse', 'mix'),
-            26: ('sine', 'detune'), 27: ('saw', 'detune'), 28: ('triangle', 'detune'), 29: ('pulse', 'detune')
-        }
-        if control in cc_to_osc:
-            osc_type, param_type = cc_to_osc[control]
-            if param_type == 'mix':
-                self.oscillator.set_mix_level(osc_type, value)
-            else:
-                self.oscillator.set_detune(osc_type, value)
-        elif control == 22:
-            self.filter.set_cutoff_freq(value * 100.0)
-        elif control == 23:
-            self.filter.set_resonance(value / 127.0)
-        elif control in [18, 19, 20, 21]:
-            self.adsr_control_change(control, value)
+        with self.param_lock:
+            try:
+                cc_to_osc = {
+                    14: ('sine', 'mix'), 15: ('saw', 'mix'), 16: ('triangle', 'mix'), 17: ('pulse', 'mix'),
+                    26: ('sine', 'detune'), 27: ('saw', 'detune'), 28: ('triangle', 'detune'), 29: ('pulse', 'detune')
+                }
+                
+                if control in cc_to_osc:
+                    osc_type, param_type = cc_to_osc[control]
+                    if param_type == 'mix':
+                        self.oscillator.set_mix_level(osc_type, value)
+                    else:
+                        self.oscillator.set_detune(osc_type, value)
+                elif control == 22:
+                    self.filter.set_cutoff_freq(value * 100.0)
+                elif control == 23:
+                    self.filter.set_resonance(value / 127.0)
+                elif control in [18, 19, 20, 21]:
+                    self.adsr_control_change(control, value)
+
+                # Effects controls (CC 102-106)
+                effect_ccs = {
+                    102: 'reverb', 103: 'distortion', 104: 'delay',
+                    105: 'flanger', 106: 'chorus'
+                }
+                
+                if control in effect_ccs:
+                    effect_name = effect_ccs[control]
+                    if effect_name in self.effects:
+                        effect = self.effects[effect_name]
+                        dry_wet = value / 127.0
+                        effect.wet = dry_wet
+                        effect.dry = 1.0 - dry_wet
+                        print_effect_values(effect_name, effect.enabled, dry_wet)
+
+            except Exception as e:
+                print(f"Control change error: {e}")
 
         print_all_values(
             self.oscillator.mix_levels,
@@ -129,56 +171,101 @@ class Synthesizer:
             self.adsr.set_release(value / 127.0)
 
     def audio_callback(self, outdata, frames, time, status):
-        outdata.fill(0)
-        temp_buffer = np.zeros_like(outdata[:, 0])
-        
-        # Process events
-        while not self.event_queue.empty():
-            event = self.event_queue.get()
-            if event[0] == 'note_on':
-                _, note, freq = event
-                self.adsr.note_on()
-            elif event[0] == 'note_off':
-                _, note = event
-                self.adsr.note_off()
+        try:
+            outdata.fill(0)
+            temp_buffer = np.zeros_like(outdata[:, 0])
+            
+            # Process events with lock
+            while not self.event_queue.empty():
+                event = self.event_queue.get()
+                with self.voice_lock:
+                    if event[0] == 'note_on':
+                        _, note, freq = event
+                        if note in self.active_voices:
+                            self.active_voices[note].adsr.note_on()
+                    elif event[0] == 'note_off':
+                        _, note = event
 
-        # Process each voice separately
-        if self.active_voices or self.released_voices:
-            duration = frames / self.sample_rate
-            
-            # Process active voices
-            for voice in self.active_voices.values():
-                # Generate base waveform
-                waveform = self.oscillator.generate(voice.freq, self.sample_rate, duration)
-                # Process through voice's audio chain
-                processed = voice.audio_chain.process_voice(voice, waveform)
-                temp_buffer += processed
-            
-            # Process released voices similarly
-            released_done = []
-            for note, voice in self.released_voices.items():
-                waveform = self.oscillator.generate(voice.freq, self.sample_rate, duration)
-                temp_buffer += voice.audio_chain.process_voice(voice, waveform)
-                voice.phase = (voice.phase + frames) % self.sample_rate
-                
-                if not voice.active:  # Voice finished release phase
-                    released_done.append(note)
-            
-            # Remove finished voices
-            for note in released_done:
-                del self.released_voices[note]
-            
-            # Process through global effects chain
-            temp_buffer = self.effects_chain.process_audio(temp_buffer)
-            
+            # Process voices with lock
+            with self.voice_lock:
+                if self.active_voices or self.released_voices:
+                    duration = frames / self.sample_rate
+                    
+                    # Process active voices
+                    for voice in list(self.active_voices.values()):
+                        try:
+                            waveform = self.oscillator.generate(voice.freq, self.sample_rate, duration)
+                            processed = voice.audio_chain.process_voice(voice, waveform)
+                            processed = voice.adsr.apply_envelope(processed)
+                            temp_buffer += processed
+                        except Exception as e:
+                            print(f"Voice processing error: {e}")
+                    
+                    # Process released voices
+                    released_done = []
+                    for note, voice in self.released_voices.items():
+                        try:
+                            if voice.is_finished():
+                                released_done.append(note)
+                                continue
+                            
+                            waveform = self.oscillator.generate(voice.freq, self.sample_rate, duration)
+                            processed = voice.audio_chain.process_voice(voice, waveform)
+                            processed = voice.adsr.apply_envelope(processed)
+                            temp_buffer += processed
+                        except Exception as e:
+                            print(f"Released voice processing error: {e}")
+                            released_done.append(note)
+
+                    # Remove finished voices
+                    for note in released_done:
+                        self.released_voices.pop(note, None)
+
+            # Process through effects chain with parameter lock
+            with self.param_lock:
+                try:
+                    temp_buffer = self.effects_chain.process_audio(temp_buffer)
+                except Exception as e:
+                    print(f"Effects processing error: {e}")
+
             # Apply final mixing
-            outdata[:, 0] = np.tanh(temp_buffer * 0.5)  # Soft clipping
+            np.clip(temp_buffer, -1.0, 1.0, out=temp_buffer)
+            outdata[:, 0] = temp_buffer
+
+        except Exception as e:
+            print(f"Audio callback error: {e}")
+            outdata.fill(0)
+
+    def toggle_effect(self, effect_name, enabled):
+        if effect_name in self.effects:
+            self.effects[effect_name].enabled = enabled
+            print_effect_values(effect_name, enabled, self.effects[effect_name].wet)
 
 class Voice:
-    def __init__(self, freq):
+    def __init__(self, freq, template_chain=None):
         self.freq = freq
         self.phase = 0.0
         self.active = True
         self.release_triggered = False
-        self.adsr = ADSR()  # Each voice gets its own ADSR
-        self.audio_chain = None  # Will be set to a copy of the main chain
+        self.adsr = ADSR()
+        self.audio_chain = self._create_chain(template_chain)
+        self.note_on_time = time.time()
+
+    def _create_chain(self, template):
+        """Create a new chain based on template without copying locks"""
+        if template is None:
+            return None
+        
+        chain = AudioChainHandler()
+        # Copy modules without their locks
+        for module in template.chain:
+            if isinstance(module, OscillatorModule):
+                chain.add_module(OscillatorModule(module.oscillator))
+            elif isinstance(module, FilterModule):
+                chain.add_module(FilterModule(module.filter))
+            elif isinstance(module, ADSRModule):
+                chain.add_module(ADSRModule(self.adsr))
+        return chain
+
+    def is_finished(self):
+        return self.release_triggered and self.adsr.current_state == 'off'

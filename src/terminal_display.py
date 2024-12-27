@@ -50,3 +50,7 @@ def start_gui():
     gui = SynthesizerGUI()
     TerminalDisplay.set_gui(gui)
     gui.start()
+
+def print_effect_values(effect_name, enabled, dry_wet):
+    if TerminalDisplay._gui:
+        TerminalDisplay._gui.update_effect(effect_name, enabled, dry_wet)

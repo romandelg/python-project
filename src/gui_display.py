@@ -14,10 +14,13 @@ class SynthesizerGUI:
         self.osc_frame = self._create_section_frame("Oscillator Mix Levels")
         self.filter_frame = self._create_section_frame("Filter Parameters")
         self.adsr_frame = self._create_section_frame("ADSR Envelope")
+        self.effects_frame = self._create_section_frame("Effects")
         
         self.osc_bars = self._create_osc_section()
         self.filter_bars = self._create_filter_section()
         self.adsr_bars = self._create_adsr_section()
+        self.effects_controls = self._create_effects_section()
+        
         self.running = True
         self.last_update = time.time()
         self.update_interval = 1/30  # 30 FPS max
@@ -79,6 +82,29 @@ class SynthesizerGUI:
             controls[label.lower()] = (bar, value_label)
         return controls
 
+    def _create_effects_section(self):
+        controls = {}
+        effects = ['Reverb', 'Distortion', 'Delay', 'Flanger', 'Chorus']
+        
+        for i, effect in enumerate(effects):
+            frame = ttk.Frame(self.effects_frame)
+            frame.grid(row=i, column=0, sticky='ew', padx=5, pady=2)
+            
+            # Enable/Disable switch
+            switch = ttk.Checkbutton(frame, text=effect)
+            switch.grid(row=0, column=0, padx=5)
+            
+            # Dry/Wet control
+            bar = ttk.Progressbar(frame, length=150, mode='determinate')
+            bar.grid(row=0, column=1, padx=5)
+            
+            value_label = ttk.Label(frame, text="0.00")
+            value_label.grid(row=0, column=2, padx=5)
+            
+            controls[effect.lower()] = (switch, bar, value_label)
+        
+        return controls
+
     def process_updates(self):
         current_time = time.time()
         if current_time - self.last_update >= self.update_interval:
@@ -96,6 +122,8 @@ class SynthesizerGUI:
                 self._update_filter(*updates['filter'])
             if 'adsr' in updates:
                 self._update_adsr(*updates['adsr'])
+            if 'effect' in updates:
+                self._update_effect(*updates['effect'])
 
             self.last_update = current_time
 
@@ -131,6 +159,16 @@ class SynthesizerGUI:
             bar, label = self.adsr_bars[param]
             bar['value'] = value * 100
             label['text'] = f"{value:.2f}"
+
+    def update_effect(self, effect_name, enabled, dry_wet):
+        self.update_queue.put(('effect', (effect_name, enabled, dry_wet)))
+
+    def _update_effect(self, effect_name, enabled, dry_wet):
+        if effect_name in self.effects_controls:
+            switch, bar, label = self.effects_controls[effect_name]
+            switch.state(['selected' if enabled else '!selected'])
+            bar['value'] = dry_wet * 100
+            label['text'] = f"{dry_wet:.2f}"
 
     def start(self):
         self.process_updates()  # Start processing updates
